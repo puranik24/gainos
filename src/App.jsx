@@ -189,6 +189,7 @@ export default function GainOS() {
   const [meas, setMeas] = usePersist("meas", { chest:82, waist:70, arms:28, shoulders:98, thigh:48 });
   const [streak, setStreak] = usePersist("streak", 12);
   const [gymSchedule, setGymSchedule] = usePersist("gymSchedule", WEEK_GYM);
+  const [workoutPlans, setWorkoutPlans] = usePersist("workoutPlans", WORKOUT_PLANS);
   const [weekMeals, setWeekMeals] = usePersist("wm", () => Object.fromEntries(DAYS.map(d=>[d, Object.fromEntries(MEAL_SLOTS.map(s=>[s.key,""]))])));
   const [doneSets, setDoneSets] = usePersist("sets_"+todayKey, {});
   const [dailyNotes, setDailyNotes] = usePersist("notes_"+todayKey, "");
@@ -196,11 +197,12 @@ export default function GainOS() {
   const [recipeOpen, setRecipeOpen] = useState(null);
   const [tagFilter, setTagFilter] = useState("all");
   const [liftEdit, setLiftEdit] = useState(null);
+  const [editingWorkout, setEditingWorkout] = useState(false);
   const [showWt, setShowWt] = useState(false);
   const [newWt, setNewWt] = useState(weight);
 
   const upd = (k,v) => setLog(l=>({...l,[k]:v}));
-  const gymOptions = Object.keys(WORKOUT_PLANS);
+  const gymOptions = Object.keys(workoutPlans);
   const gymDay = gymSchedule[dayIdx] || WEEK_GYM[dayIdx];
   const gymColor = GYM_COLORS[gymDay]||"#5f7392";
   const calLeft = TARGETS.calories - log.calories;
@@ -219,6 +221,32 @@ export default function GainOS() {
     setWeight(newWt);
     setWeightHistory(h=>[...h.filter(e=>e.d!==todayKey), {d:todayKey,w:newWt}].sort((a,b)=>a.d.localeCompare(b.d)).slice(-30));
     setShowWt(false);
+  };
+
+  const updateExercise = (plan, index, patch) => {
+    setWorkoutPlans(plans => ({
+      ...plans,
+      [plan]: (plans[plan] || []).map((ex, i) => i === index ? { ...ex, ...patch } : ex)
+    }));
+  };
+
+  const addExercise = (plan) => {
+    setWorkoutPlans(plans => ({
+      ...plans,
+      [plan]: [...(plans[plan] || []), { name:"New Exercise", sets:3, reps:"10-12", rest:"60s", notes:"Add your form cue or target here" }]
+    }));
+  };
+
+  const removeExercise = (plan, index, name) => {
+    setWorkoutPlans(plans => ({
+      ...plans,
+      [plan]: (plans[plan] || []).filter((_, i) => i !== index)
+    }));
+    setDoneSets(ds => {
+      const next = { ...ds };
+      delete next[name];
+      return next;
+    });
   };
 
   // STYLES
@@ -472,18 +500,22 @@ export default function GainOS() {
 
   // ── GYM ───────────────────────────────────────────────────────────
   const tabGym = () => {
-    const exercises = WORKOUT_PLANS[gymDay] || [];
+    const exercises = workoutPlans[gymDay] || [];
     const completed = exercises.filter(ex=>(doneSets[ex.name]||0)>=ex.sets).length;
+    const completedPct = exercises.length ? Math.round((completed/exercises.length)*100) : 0;
     return (
       <div style={{ display:"grid", gap:14 }}>
-        {card(<div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+        {card(<div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, flexWrap:"wrap" }}>
           <div>
             {sec(`${gymDay} DAY`, gymDay==="Rest"?"Recovery day":"Track sets as you go")}
             <div style={{ fontSize:12, color:"#5f7392" }}>
               {gymDay==="Push"?"Chest · Shoulders · Triceps":gymDay==="Pull"?"Back · Biceps · Rear Delts":gymDay==="Legs"?"Quads · Hamstrings · Glutes · Core":"Rest · Stretch · Recover"}
             </div>
           </div>
-          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:36, color:gymColor, letterSpacing:2 }}>{gymDay}</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", justifyContent:"flex-end" }}>
+            {gymDay!=="Rest" && <button onClick={()=>setEditingWorkout(v=>!v)} style={{ padding:"8px 12px", borderRadius:9, border:`1px solid ${editingWorkout?"#f9731650":"#1d4ed830"}`, background:editingWorkout?"#fff7ed":"#1d4ed812", color:editingWorkout?"#f97316":"#1d4ed8", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:800 }}>{editingWorkout?"Done Editing":"Edit Exercises"}</button>}
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:36, color:gymColor, letterSpacing:2 }}>{gymDay}</div>
+          </div>
         </div>)}
 
         {gymDay==="Rest" ? card(<div>
@@ -493,11 +525,38 @@ export default function GainOS() {
           ))}
         </div>) : (
           <>
+            {editingWorkout && card(<div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, flexWrap:"wrap", marginBottom:16 }}>
+                {sec("EDIT EXERCISES",`Customize your ${gymDay} workout`)}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <button onClick={()=>addExercise(gymDay)} style={{ padding:"8px 12px", borderRadius:8, border:"none", background:"#1d4ed8", color:"#ffffff", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:800 }}>+ Exercise</button>
+                  <button onClick={()=>setWorkoutPlans(p=>({...p,[gymDay]:WORKOUT_PLANS[gymDay]||[]}))} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid #f9731640", background:"#fff7ed", color:"#f97316", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:800 }}>Reset {gymDay}</button>
+                </div>
+              </div>
+              <div style={{ display:"grid", gap:12 }}>
+                {exercises.map((ex,i)=>(
+                  <div key={`${ex.name}-${i}`} style={{ border:"1px solid #c7d8f6", borderRadius:14, padding:14, background:"#f8fbff" }}>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(3,minmax(0,1fr))", gap:8, alignItems:"center" }}>
+                      <input type="text" value={ex.name} onChange={e=>updateExercise(gymDay,i,{name:e.target.value})} style={{ gridColumn:"1 / -1", minWidth:0, background:"#ffffff", border:"1px solid #b9cdf2", color:"#17233f", padding:"8px 10px", borderRadius:8, fontFamily:"inherit", fontSize:13, fontWeight:700 }}/>
+                      <input type="number" min="1" value={ex.sets} onChange={e=>updateExercise(gymDay,i,{sets:Math.max(1,+e.target.value||1)})} title="Sets"/>
+                      <input type="text" value={ex.reps} onChange={e=>updateExercise(gymDay,i,{reps:e.target.value})} title="Reps" style={{ minWidth:0, background:"#ffffff", border:"1px solid #b9cdf2", color:"#17233f", padding:"8px 10px", borderRadius:8, fontFamily:"inherit", fontSize:13 }}/>
+                      <input type="text" value={ex.rest} onChange={e=>updateExercise(gymDay,i,{rest:e.target.value})} title="Rest" style={{ minWidth:0, background:"#ffffff", border:"1px solid #b9cdf2", color:"#17233f", padding:"8px 10px", borderRadius:8, fontFamily:"inherit", fontSize:13 }}/>
+                    </div>
+                    <textarea rows={2} value={ex.notes} onChange={e=>updateExercise(gymDay,i,{notes:e.target.value})} style={{ marginTop:8, background:"#ffffff" }}/>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginTop:8 }}>
+                      <div style={{ fontSize:10, color:"#5f7392", textTransform:"uppercase", letterSpacing:1 }}>Name · Sets · Reps · Rest · Notes</div>
+                      <button onClick={()=>removeExercise(gymDay,i,ex.name)} style={{ padding:"6px 10px", borderRadius:8, border:"1px solid #dc262630", background:"#fff1f2", color:"#dc2626", cursor:"pointer", fontFamily:"inherit", fontSize:11, fontWeight:800 }}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+                {exercises.length===0 && <div style={{ padding:"18px", textAlign:"center", color:"#5f7392", background:"#f8fbff", border:"1px dashed #b9cdf2", borderRadius:14 }}>No exercises yet. Add one to build this workout.</div>}
+              </div>
+            </div>)}
             {card(<div>
               {sec("SESSION STATS")}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
                 <StatBox label="Total Exercises" val={exercises.length} color="#1d4ed8"/>
-                <StatBox label="Completed" val={completed} color="#16a34a" sub={`${Math.round((completed/exercises.length)*100)}%`}/>
+                <StatBox label="Completed" val={completed} color="#16a34a" sub={`${completedPct}%`}/>
                 <StatBox label="Total Sets" val={exercises.reduce((a,e)=>a+e.sets,0)} color="#f97316"/>
               </div>
             </div>)}
